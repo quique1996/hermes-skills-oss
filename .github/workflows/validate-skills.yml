@@ -1,0 +1,75 @@
+name: Validate Skills
+
+on:
+  push:
+    branches: [main, 'pull/**']
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find all SKILL.md files
+        id: find
+        run: |
+          echo "skills=$(find . -name 'SKILL.md' -not -path './.git/*' | wc -l)" >> $GITHUB_OUTPUT
+          find . -name 'SKILL.md' -not -path './.git/*' > skill_list.txt
+          cat skill_list.txt
+
+      - name: Validate YAML frontmatter
+        run: |
+          set -e
+          while IFS= read -r skill_file; do
+            echo "Checking: $skill_file"
+            # Extract frontmatter (between first two --- lines)
+            python3 -c "
+            import sys, yaml
+            with open('$skill_file') as f:
+                content = f.read()
+            if not content.startswith('---'):
+                print(f'FAIL: $skill_file missing frontmatter')
+                sys.exit(1)
+            parts = content.split('---', 2)
+            if len(parts) < 3:
+                print(f'FAIL: $skill_file malformed frontmatter')
+                sys.exit(1)
+            fm = yaml.safe_load(parts[1])
+            required = ['name', 'description']
+            for k in required:
+                if k not in fm:
+                    print(f'FAIL: $skill_file missing required key: {k}')
+                    sys.exit(1)
+            print(f'OK: $skill_file has valid frontmatter ({fm[\"name\"]})')
+            "
+          done < skill_list.txt
+
+      - name: Check file structure
+        run: |
+          while IFS= read -r skill_file; do
+            skill_dir=$(dirname "$skill_file")
+            echo "Checking structure: $skill_dir"
+            # SKILL.md must exist (already found)
+            # Check minimum content
+            lines=$(wc -l < "$skill_file")
+            if [ "$lines" -lt 50 ]; then
+              echo "WARN: $skill_file has only $lines lines (recommended: 50+)"
+            fi
+            # Check for references/ directory (optional but recommended)
+            if [ -d "$skill_dir/references" ]; then
+              ref_count=$(ls "$skill_dir/references/" | wc -l)
+              echo "  references/: $ref_count files"
+            fi
+            # Check for scripts/ directory
+            if [ -d "$skill_dir/scripts" ]; then
+              script_count=$(ls "$skill_dir/scripts/" | wc -l)
+              echo "  scripts/: $script_count files"
+            fi
+          done < skill_list.txt
+
+      - name: Summary
+        run: |
+          echo "Validated ${{ steps.find.outputs.skills }} skills"
+          echo "All checks passed"
